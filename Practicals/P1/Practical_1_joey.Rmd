@@ -1,0 +1,160 @@
+---
+title: "Practical_1_Joey_Richardson"
+output: html_document
+---
+
+```{r}
+library(ISLR)
+library(tidyverse)
+library(haven)
+library(readxl)
+```
+
+
+```{r}
+object_1 <- 1:5 # guess: integer
+object_2 <- 1L:5L # guess: character
+object_3 <- "-123.456" # guess: character
+object_4 <- as.numeric(object_2) # guess: numeric
+object_5 <- letters[object_1] #guess: character
+object_6 <- as.factor(rep(object_5, 2)) # guess: factor
+object_7 <- c(1, 2, 3, "4", "5", "6") # guess: character
+```
+
+```{r}
+class(object_1)
+class(object_2)
+class(object_3)
+class(object_4)
+class(object_5)
+class(object_6)
+class(object_7)
+```
+
+```{r}
+as.numeric(object_7)
+```
+
+```{r}
+objects <- list(object_1, object_2, object_3, object_4, object_5, object_6, object_7)
+```
+
+```{r}
+dataframe <- data.frame(a = object_1, b = object_2, c = object_5)
+```
+
+```{r}
+ncol(dataframe)
+nrow(dataframe)
+```
+
+```{r}
+apps <- read_csv("data/googleplaystore.csv")
+spec(apps)
+```
+
+They almost all have character variable types, but some are numbers (e.g. size, installs, price, rating, etc.)
+
+```{r}
+head(apps)
+```
+
+```{r}
+students <- read_xlsx("data/students.xlsx")
+spec(students)
+head(students)
+tail(students)
+View(students)
+```
+
+```{r}
+summary(students)
+```
+
+The grades range from 4.844 to 9.291.
+
+```{r}
+filter(students, grade < 5.5)
+```
+
+```{r}
+filter(students, grade > 8, programme == "A")
+```
+
+```{r}
+arrange(students, programme, -grade)
+```
+```{r}
+select(students, student_number, programme)
+```
+
+```{r}
+students <- mutate(students, pass = grade > 5.5)
+students
+```
+
+```{r}
+students_recoded <- mutate(students, programme = recode(programme, "A" = "Science", "B" = "Social Science"))
+```
+
+
+```{r}
+popular_apps <-
+  read_csv("data/googleplaystore.csv") %>%
+  mutate(Downloads = parse_number(Installs)) %>%
+  filter(Downloads > 500000000) %>%
+  arrange(Rating) %>%
+  select(App, Rating, Downloads, Category) %>%
+  distinct(App, .keep_all = TRUE)
+apps_dataset
+```
+
+
+```{r}
+popular_apps %>%
+  summarise(
+    median = median(Rating),
+    min = min(Rating),
+    max = max(Rating)
+  )
+```
+
+```{r}
+mad <- function(x) {
+  median(abs(x - median(x)))
+}
+```
+
+```{r}
+popular_apps %>%
+  summarise(
+    median = median(as.numeric(Rating)),
+    min = min(as.numeric(Rating)),
+    max = max(as.numeric(Rating)),
+    mad = mad(as.numeric(Rating))
+  )
+```
+
+```{r}
+popular_apps %>%
+  group_by(Category) %>% 
+  summarise(
+    median = median(as.numeric(Rating)),
+    min = min(as.numeric(Rating)), 
+    max = max(as.numeric(Rating)),
+    mad = mad(as.numeric(Rating))
+  )
+```
+
+```{r}
+read_csv("data/googleplaystore.csv") %>%
+  filter(Category == 'GAME' | Category == 'COMMUNICATION') %>%
+  select(App, Category, Rating) %>%
+  distinct(App, .keep_all = TRUE) %>%
+  group_by(Category) %>%
+  summarise(
+    mean(as.numeric(Rating), na.rm = TRUE)
+  )
+```
+
+Games get higher ratings than Communication apps!
