@@ -1,0 +1,205 @@
+---
+# Practical 6
+# Raeven van den Acker
+# 11-10-2021
+---
+```{r} 
+# Load packages & set seed
+library(MASS)
+library(class)
+library(ISLR)
+library(tidyverse)
+
+set.seed(45)
+```
+
+```{r}
+# 1. & 2. Create a scatter plot of the Default data set
+Default %>% 
+  ggplot(aes(x=balance, y=income, color=default)) +
+  geom_point() +
+  facet_grid(cols = vars(student)) +
+  theme_minimal()
+```
+The grand majority of the people in the data set have not defaulted on their credit. Most people that have, are concentrated on the higher end of the balance spectrum. They are spread over all incomes. Most people with higher balances have defaulted. 
+People with low incomes tend to be students. They don't seem to represent a higher proportion of defaulted people.
+
+```{r}
+# 3. Make student a dummy variable & split Default into a training and test set
+split <- c(rep("train", nrow(Default)*0.8), rep("test",  nrow(Default)*0.2))
+
+Default <- 
+  mutate(Default, student=ifelse(Default$student=='Yes', 1, 0)) %>% 
+  mutate(split = sample(split))
+
+default_train <- Default %>% 
+  filter(split == 'train') %>% 
+  select(-split)
+
+
+default_test <- Default %>% 
+  filter(split == 'test') %>%
+  select(-split)
+
+
+# 4. Create class predicitons using kNN with k = 5
+
+knn_5_pred <- knn(
+  train = default_train %>% select(-default),
+  test  = default_test  %>% select(-default),
+  cl    = default_train$default,
+  k     = 5
+)
+
+# 5. Create two scatter plots comparing the predicted to the test default classification
+
+default_test %>% 
+  mutate(default_pred = knn_5_pred) %>% 
+  
+  ggplot(aes(x=balance, y=income, color=default_pred)) +
+  geom_point() +
+  facet_grid(cols = vars(student)) +
+  theme_minimal() +
+  labs(title='predicted classification')
+
+default_test %>% 
+  ggplot(aes(x=balance, y=income, color=default)) +
+  geom_point() +
+  facet_grid(cols = vars(student)) +
+  theme_minimal() +
+  labs(title='true classification')
+```
+Comparing the two plots showing predicted and true classifications, there are fewer predicted defaulted people than observed, especially for lower balances. However, the range in balance and income seems the same between the predicted and observed classifications.
+
+```{r}
+# 6. Repeat the process but with k=2
+
+knn_2_pred <- knn(
+  train = default_train %>% select(-default),
+  test  = default_test  %>% select(-default),
+  cl    = default_train$default,
+  k     = 2
+)
+
+default_test %>% 
+  mutate(default_pred = knn_2_pred) %>% 
+  
+  ggplot(aes(x=balance, y=income, color=default_pred)) +
+  geom_point() +
+  facet_grid(cols = vars(student)) +
+  theme_minimal() +
+  labs(title='predicted classification')
+
+default_test %>% 
+  ggplot(aes(x=balance, y=income, color=default)) +
+  geom_point() +
+  facet_grid(cols = vars(student)) +
+  theme_minimal() +
+  labs(title='true classification')
+```
+Now there seem to be more predicted defaults, which is more realistic.
+```{r}
+# 7.
+table(true = default_test$default, predicted = knn_2_pred)
+```
+If the confusion matrix were perfect, all values would be on the diagonal, the sum of which would equal the total number of data points. All off-diagonal elements would be 0.
+```{r}
+# 8. Confusion matrix for k=5
+table(true = default_test$default, predicted = knn_5_pred)
+```
+The sum of diagonals in the k=5 confusion matrix is 1930 and in the k=2 matrix is 1908, implying that the k=5 model is more accurate. The off-diagonals in the k=2 matrix are closer to each other, so the model is more consistent in its mis-predictions.
+```{r}
+# 9. fit a logistic regression model to the default_train data
+
+lr_mod <- glm(default ~ ., 
+              family = binomial, 
+              data = default_train)
+
+# 10. Visualize the predicted v observed probabilities 
+
+tibble(observed = default_train$default, predicted = predict(lr_mod, type = 'response')) %>% 
+  ggplot(aes(x = observed, y = predicted)) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.3) +
+  theme_minimal() +
+  labs(y = 'predicted default probability')
+```
+The model doesn't seem particularly good at predicting the people that will default, since the "yes" category stretches over the whole predicted default probability range. It is also not good at predicting who will default, since there is a concentration of data points with low predicted default probability in the "no" category. Furthermore, there is a lack of data points with high default probability in the "no" category.
+```{r}
+# 11. Look at the coefficients of lr_mod
+coefs <- coefficients(lr_mod)
+coefs
+```
+The coefficient for balance is positive, so an increase in the balance will increase the probability of defaulting
+```{r}
+# probability of default for a non-student, with an income of 40 000, and a balance of 3000
+log_odds <- coefs[1] + coefs[2]*0 + coefs[3]*3000 + coefs[4]*40000
+default_prob <- 1/(1+exp(-log_odds))
+```
+There are no points this far right on the plots from before, but most points on the right (high balance) are defaults, regardless of their income, so this corroborates with the plots.
+```{r}
+# 12. Create the data set balance_df
+
+balance_df <- tibble(student = rep(0,500),
+                     balance = seq(0,3000, length.out = 500),
+                     income = rep(mean(default_train$income),500))
+
+# 13. Predict probabilities for different balances
+
+balance_df$balance_prob = predict(lr_mod, newdata = balance_df, type = 'response')
+
+balance_df %>% 
+  ggplot(aes(x = balance, y = balance_prob)) +
+  geom_point() +
+  theme_minimal() +
+  labs(title = "predicted balance probabilities")
+```
+This is in line with what I expect since it is the characteristic shape of a logistic regression, which is the model used to predict the probabilities
+```{r}
+# 14. Create a confusion matrix by using a cutoff predicted probability at 0.5
+
+pred_prob <- predict(lr_mod, newdata = default_test, type = "response")
+pred_default <- factor(pred_prob>0.5, labels = c("No", "Yes"))
+
+table(true = default_test$default, predicted = pred_default)
+
+```
+Here we see that logistic regression performs better since the diagonal sum of the confusion matrix is larger than for kNN
+```{r}
+
+# 15. Train an LDA classifier on the training set
+
+lda_mod <- lda(default ~ ., data = default_train)
+lda_mod
+
+```
+The proportion of students that default (37%) is higher than the proportion of non-students that default (29%). The balance of defaulters is higher than that of non-defaulters. The income of defaulters slightly lower than that of non-defaulters.
+```{r}
+# 17. Create a confusion matrix
+
+pred_lda <- predict(lda_mod, newdata = default_test, type = "response")
+
+
+table(true = default_test$default, predicted = pred_lda$class)
+```
+The linear discriminant analysis model is slightly worse than the logistic regression model but better than the kNN models still.
+```{r}
+# Final assignment
+
+titanic <- read_csv("Titanic.csv")
+
+new_data <- tibble(
+          PClass = c( "3rd", "2nd"),
+          Age = c(14, 14), 
+          Sex = c("male", "female")
+        )
+
+# logistic regression model
+lr_mod_titanic <- glm(Survived ~ Age + Sex + PClass, family = binomial, data = titanic)
+lr_pred_titanic <- predict(lr_mod_titanic, newdata = new_data, type = "response")
+
+# linear discriminant analysis model
+lda_mod_titanic <- lda(Survived ~ Age + Sex + PClass, data = titanic)
+lda_pred_titanic <- predict(lda_mod_titanic, newdata = new_data, type = "response")
+```
+From the linear regression model the probability of survival of a 14 year old male in 3rd class is 12.5%, while the survival probability of a 14 year old female in 2nd class is 87.2%. This makes sense since women and children were allowed in the safety boats first and 2nd class was in a better position to flee than 3rd class since they were closer to the deck.
+According to the linear discrimnant analysis model, the probability of survival for a 14 year old male in 3rd class is almost 9% and for a 14 year old female in 2nd class is 90%. These probabilities are similar to the ones from the linear regression model but the male survival probability is slightly lower and that of the female is slightly higher. 
