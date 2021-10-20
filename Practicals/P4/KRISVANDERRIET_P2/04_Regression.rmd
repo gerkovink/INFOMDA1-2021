@@ -1,0 +1,125 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r}
+library(ggplot2)
+library(ISLR)
+library(MASS)
+library(tidyverse)
+```
+
+```{r}
+lm_ses <- lm(medv ~ lstat, data = Boston)
+
+#coefficients
+coef(lm_ses)
+#the slope value means that there is a negative linaer relation between housing value and socio-economic status
+
+#summary
+summary(lm_ses)
+#we see that these variables correlate quite resonably with a R^2 of 0.5441.
+
+#predicted values
+y_pred <- predict(lm_ses)
+
+#scatter plot
+plot(y_pred, Boston$medv)
+#we see that the predicted and real values correlate linearly till ~28, then they start to deviate. In a perfect fit they would all fit on a straight line with y = x 
+
+#make a sequence 
+pred_data <- data.frame(lstat = seq(0,40,40/1000))
+
+#newdata argument
+y_pred_new <- predict(lm_ses, newdata = pred_data)
+
+```
+
+```{r}
+#scatter plot 
+p_scatter <- ggplot(aes(x = lstat, y = medv), data = Boston) + 
+  geom_point() + 
+  theme_minimal()
+p_scatter
+
+#add to data frame
+pred_data <- mutate(pred_data, medv = y_pred_new)
+
+#add to scatter plot
+p_scatter2 <- p_scatter + geom_line(aes(x = lstat, y = medv), data = pred_data, size = 1.5)
+#this line represents the data if it would be ideally distributed
+
+#confidence interval
+y_pred_95 <- data.frame(predict(lm_ses, newdata = pred_data, interval = 'confidence'))
+#this data frame represents the confidence intervals for a 95% range
+
+#all in one data frame
+predictions <- data.frame(medv = pred_data$medv, lstat = pred_data$lstat, lower = y_pred_95$lwr, upper = y_pred_95$upr)
+
+#with ribbon plot
+p_scatter3 <- p_scatter2 + geom_ribbon(aes(x = lstat, ymin = lower, ymax = upper), data = predictions, color = 'blue', fill = 'lightblue', alpha = 0.5)
+
+#the ribbon represent the possible outcome of model projections for 95% of the model runs.
+
+#now with prediction interval
+y_pred_prediction <- data.frame(predict(lm_ses, newdata = pred_data, interval = 'prediction'))
+predictions_p <- data.frame(medv = pred_data$medv, lstat = pred_data$lstat, lower = y_pred_prediction$lwr, upper = y_pred_prediction$upr)
+p_scatter4<- p_scatter2 + geom_ribbon(aes(x = lstat, ymin = lower, ymax = upper), data = predictions_p, color = 'blue', fill = 'lightblue', alpha = 0.5)
+```
+
+```{r}
+#mse function
+mse <- function(y_true, y_pred) {
+  mse <- 1/length(y_true) * sum((y_pred - y_true)^2)
+  return(mse) 
+}
+#testing
+mse(1:10, 10:1)
+
+#calculating on model
+mse(Boston$lstat, y_pred)
+```
+```{r}
+#create vector for data
+splits <- c(rep("train", 253), rep("validation", 152), rep("test",101))
+
+#add it to the boston dataset
+boston_master <- mutate(Boston, splits = sample(splits))
+
+#train, test, valid
+boston_train <- filter(boston_master, splits == 'train')
+boston_valid <- filter(boston_master, splits == 'validation')
+boston_test <- filter(boston_master, splits == 'test')
+
+#train training data
+model_1 <- lm(medv ~ lstat, data = boston_train)
+summary(model_1)
+
+#model mse
+model_1_mse_train <- mse(predict(model_1), boston_train$medv)
+model_1_mse_train
+
+#model mse on validation
+predicted_new <- model_1$coefficients[1] + model_1$coefficients[2] * boston_valid$lsta
+model_1_mse_valid <- mse(predicted_new, boston_valid$medv)
+model_1_mse_valid
+
+#new model
+model_2 <- lm(medv ~ lstat + age + tax, data = boston_train)
+model_2_mse_train <- mse(predict(model_2), boston_train$medv)
+predicted_new2 <- model_2$coefficients[1] + model_2$coefficients[2] * boston_valid$lsta + 
+  model_2$coefficients[3] * boston_valid$lsta + model_2$coefficients[3] * boston_valid$lsta
+model_2_mse_valid <- mse(predicted_new2, boston_valid$medv)
+
+#the mse decreases for the training data, however it increases for validation. So I would choose model 1
+predicted_new3 <- model_1$coefficients[1] + model_1$coefficients[2] * boston_test$lsta
+model_1_mse_test <- mse(predicted_new3, boston_test$medv)
+model_1_mse_test
+```
+
+```{r}
+#final exercise is missing, answers are not visable anymore
+```
+
+
