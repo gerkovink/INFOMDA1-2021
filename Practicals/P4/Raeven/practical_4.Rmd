@@ -1,0 +1,172 @@
+---
+# Practical 4
+# Raeven van den Acker
+# 14-10-2021
+---
+```{r}
+# Load packages
+library(ISLR)
+library(MASS)
+library(tidyverse)
+```
+
+```{r}
+# 1. Create lm_ses
+
+lm_ses <- lm(medv ~ lstat, data = Boston)
+
+# 2. Extract the coefficients from the equation
+
+coef(lm_ses)
+```
+The negative slope indicates a negative relationship between someone's housing value and their socioeconomic status...so their housing value decreases as their socioeconomic status increases...?
+
+```{r}
+# 3. Get a summary of lm_ses
+
+summary(lm_ses)
+```
+This gives information about the summary statistics of the linear model. The standard errors on the coefficients are useful to see, as are the R2 values.
+
+```{r}
+# 4. & 5. Predict values for medv and create a scatter plot of true v. predicted values
+
+y_pred <- predict(lm_ses)
+
+tibble(observed = Boston$medv, predicted = y_pred) %>% 
+  ggplot(aes(x = predicted, y = observed)) +
+  geom_point() +
+  theme_minimal()
+```
+This plot shows that there is bias in the model since the data don't follow an exact 1:1 line through the origin, which would be the case if the model fit the observations exaclty. Instead, the slope is shallower, meaning that the model overpredicts the data. For observations above ~ 30, the model becomes even less accurate.
+
+```{r}
+# 6. & 7. & 8. Generate a tibble of new data to predict with, and a scatter plot of the predicted v observations
+
+pred_dat <- tibble(lstat = seq(0, 40, length.out = 1000))
+
+y_pred_new <- predict(lm_ses, newdata = pred_dat)
+
+p_scatter <- Boston %>% 
+  ggplot(aes(x = lstat, y = medv)) +
+  geom_point() + 
+  theme_minimal()
+
+# 9. Add y_pred_new to pred_dat
+
+pred_dat <- mutate(pred_dat, medv = y_pred_new)
+
+# 10. Add a line to p_scatter
+
+p_scatter + 
+  geom_line(data = pred_dat)
+```
+This line is the modeled medv against the regular sequence of lstat, so it represents the linear model lm_ses.
+
+```{r}
+# 11. Create a 95% confidence interval for this line
+
+y_pred_95 <- predict(lm_ses, newdata = pred_dat, interval = "confidence")
+
+```
+This object contains the 95% confidence interval on the model fit. Each new data point has a 95% chance of being within this interval.
+
+```{r}
+# 12. & 13. Create a data frame with the data and the 95% confidence interval and add this to p_scatter
+
+data <- tibble(medv = pred_dat$medv, lstat = pred_dat$lstat, lower = y_pred_95[,2], upper = y_pred_95[,3])
+
+p_scatter +
+  geom_ribbon(aes(ymin = data$lower, ymax = data$upper))
+
+```
+```{r}
+# 14. 
+# 15.
+```
+
+
+
+```{r}
+# 16. & 17. Write a function to calculate the MSE and check it works
+
+mse <- function(y_true, y_pred) {
+  mean((y_true - y_pred)^2)
+}
+
+mse(1:10, 10:1)
+```
+```{r}
+# 18. Calculate the MSE of the lm_ses model
+
+mse(Boston$medv, predict(lm_ses))
+```
+
+```{r}
+# 19. Create vector splits
+
+splits <- c(rep("train", 253), rep("valid", 152), rep("test",  101))
+
+# 20. Add a randomly reordered version of this vector to the Boston data set
+
+boston_master <- Boston %>% 
+  mutate(splits = sample(splits))
+
+# 21. Create training, validation and test sets from boston_master
+
+boston_train <- filter(boston_master, splits == "train")
+boston_valid <- filter(boston_master, splits == "valid")
+boston_test <- filter(boston_master, splits == "test")
+
+# 22. Train a linear regression model model_1 on the training data
+
+model_1 <- lm(medv ~ lstat, data = boston_train)
+
+summary.lm(model_1)
+```
+This is similar to the values in the summary of the model trained on all the Boston data so it is as I expect.
+
+```{r}
+# 23. Calculate the MSE of this object
+
+model_1_mse_train <- mse(y_true = boston_train$medv, 
+                         y_pred = predict(model_1, boston_train))
+
+# 24. Now calculate the MSE of the validation set
+
+model_1_mse_valid <- mse(y_true = boston_valid$medv,
+                         y_pred = predict(model_1, newdata = boston_valid))
+
+# 25. Create a second model including age and tax as predictors, and calculate its training and validation MSE
+
+model_2 <- lm(medv ~ lstat + age + tax, data = boston_train)
+
+model_2_mse_train <- mse(y_true = boston_train$medv, 
+                         y_pred = predict(model_2, boston_train))
+
+model_2_mse_valid <- mse(y_true = boston_valid$medv,
+                         y_pred = predict(model_2, newdata = boston_valid))
+```
+TEST MSE
+  model 1: 38.6
+  model 2: 36.9
+  
+VALIDATION MSE
+  model 1: 26.1
+  model 2: 24.9
+  
+Both test and validation MSE's are lower for model 2 than for model 1. This means model 2 is more accurate than model 1 which makes sense since it takes more predictors into account.
+
+```{r}
+# 26. Test MSE for model 2
+
+model_2_mse_test <- mse(y_true = boston_test$medv,
+                        y_pred = predict(model_2, newdata = boston_test))
+```
+The test MSE for model 2 is 55.7 which is high relative to the training and validation MSE's. This means that the validation MSE is an underestimation of the test MSE and that the model is not as accurate as expected originally.
+
+```{r}
+
+```
+
+ 

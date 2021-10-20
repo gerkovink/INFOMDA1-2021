@@ -19,6 +19,7 @@ nrow(baseball) # there are 263 baseball players left
 # 2. Create baseball_train (50%), baseball_valid (30%) and baseball_test (20%) data sets
 
 split <- c(rep("train", 132), rep("valid", 79), rep("test",  52))
+
 baseball <- baseball %>% 
   mutate(split = sample(split))
 baseball_train <- baseball %>% filter(split=="train")
