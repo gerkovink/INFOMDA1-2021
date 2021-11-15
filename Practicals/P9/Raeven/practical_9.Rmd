@@ -1,0 +1,191 @@
+---
+# Practical 9
+# Raeven van den Acker
+# 01-11-2021
+---
+
+```{r}
+# Loading packages
+library(tidyverse)
+library(magrittr)
+library(psych)
+library(caret)
+library(gbm)
+library(xgboost)
+library(data.table)
+library(ggforce)
+
+# Set seed & load data
+set.seed(45)
+df <- readRDS("data/train_disease.RDS")
+
+# 1. Get an impression of the data by looking at the structure of the data and creating some descriptive statistics
+
+summary(df)
+
+```
+```{r}
+# 2. Create some interesting data visualizations that show whether there are interesting patterns in the data
+
+df %>% 
+  ggplot(aes(x = Age, y = Alkaline_Phosphotase, color = Disease)) +
+  facet_wrap(~ Gender) +
+  geom_point() +
+  theme_minimal()
+
+df %>% 
+  ggplot(aes(x = Age, y = Direct_Bilirubin, color = Disease)) +
+  facet_wrap(~ Gender) +
+  geom_point() +
+  theme_minimal()
+
+prop.table(table(df$Gender, df$Disease), margin = 1) %>% as.data.frame() %>% 
+  select(Gender = Var1, Disease = Var2, 'Relative_Frequency' = Freq) %>% 
+  ggplot(aes(x = Gender, y = Relative_Frequency, col = Disease, fill = Disease)) +
+  geom_histogram(stat = 'identity', position = 'dodge') +
+  theme_minimal()
+
+```
+In the first plot we see that both diseased males and females tend to have low alkaline phosphotase counts. But so do healthy males and females so this is not necessarily a good indicator of disease. There are no clear patterns depending on age here either.
+Looking at direct Bilirubin counts, the situation is quite similar. In healthy males, however, there are instances of much higher counts that are not present in diseased males.
+Comparing the relative frequency of diseased and healthy males and females shows that a higher proportion of females are diseased.
+
+3. Shortly reflect on the difference between bagging, random forests, and boosting
+
+Bagging computes different (bootstrapped) models in parallel and combines them at the end
+Random forests are a collection of decorrelated regression tree models that are also combined at the end
+Boosting combines the bootstrapped model sequentially, so that each bootstrap is an improvement on the last
+
+```{r}
+# 4. Apply bagging to the training data, to predict the outcome Disease
+
+# specify the internal validation settings
+cvcontrol <- trainControl(method = "repeatedcv", 
+                          number = 10,
+                          allowParallel = TRUE)
+
+# apply bagging to the training data
+bagging <- train(Disease ~ ., data = df, 
+                 method = 'treebag', trControl = cvcontrol, importance = TRUE)
+
+# 5. Interpret the variable importance measure using the varImp function on the trained model object
+
+varImp(bagging) %>% plot()
+```
+Here we see that the alkaline phosphotase level is the most important of the predictors of disease. The least important is the gender.
+
+```{r}
+# 6. Create training set predictions based on the bagged model, and assess it’s performance with a confusion matrix
+
+confusionMatrix(predict(bagging, type = 'raw'), df$Disease)
+```
+There is no difference between the model outcomes and the observations...this model is perfectly tuned to this data set.
+
+```{r}
+# 7. Now ask for the output of the bagged model. Explain why the under both approaches differ
+
+bagging
+```
+```{r}
+# 8. Fit a random forest to the training data to predict the outcome Disease
+
+random_forest <- train(Disease ~ ., data = df,
+                       method = 'rf', trControl = cvcontrol, importance = TRUE)
+
+# 9. Interpret the variable importance measure. Do you draw the same conclusions as under the bagged model?
+
+varImp(random_forest) %>% plot()
+
+```
+This time the most important variable is the direct Bilirubin count and the alkaline phosphotase level is much less important. The least important predictor is still gender, but the most of the rest of the predictors have changed position. So these two models give different predictions.
+
+```{r}
+# 10. Output the model output from the random forest. Are we doing better than with the bagged model?
+
+random_forest
+```
+The accuracy in the random forest model is always higher (>0.678) than that in the bagging model, except whrn mtry = 10. 
+
+```{r}
+# 11. Now, fit a boosting model using the caret library to predict disease status.
+
+boosting <- train(Disease ~ ., data = df,
+                       method = 'gbm', trControl = cvcontrol, verbose = F)
+
+# 12. Interpret the variable importance measure. You will have to call for summary() on the model object you just created. Compare the output to the previously obtained variable importance measures.
+
+summary(boosting)
+```
+The boosting model agrees with the bagging model more than with the random forest model as to which predictors are most and least important. There are some differences in the middle though.
+
+```{r}
+# Output the model output from our gradient boosting procedure. Are we doing better than with the bagged and random forest model?
+
+boosting
+```
+There are instances with higher accuracy than the other two models and instances with lower accuracy, so depending on the number of trees and interaction depth used, the boosting method performs better or worse.
+
+```{r}
+# 14. Download the file shap.R
+
+library(devtools)
+source_url("https://github.com/pablo14/shap-values/blob/master/shap.R?raw=TRUE")
+
+#15. Specify your model as follows, and use it to create predictions on the training data.
+
+train_x <- model.matrix(Disease ~ ., df)[,-1]
+train_y <- as.numeric(df$Disease) - 1
+xgboost_train <- xgboost(data = train_x,
+                         label = train_y, 
+                         max.depth = 10,
+                         eta = 1,
+                         nthread = 4,
+                         nrounds = 4,
+                         objective = "binary:logistic",
+                         verbose = 2)
+
+pred <- tibble(Disease = predict(xgboost_train, newdata = train_x)) %>%
+  mutate(Disease = factor(ifelse(Disease < 0.5, 1, 2),
+                          labels = c("Healthy", "Disease")))
+
+table(pred$Disease, df$Disease)
+```
+```{r}
+# 16. Calculate the SHAP rank scores for all variables in the data, and create a variable importance plot using these values. Interpret the plot.
+
+shap_results <- shap.score.rank(xgboost_train,
+                                X_train = train_x,
+                                shap_approx = F)
+
+var_importance(shap_results)
+```
+This is again a different order of imprtance than the previous three models. Gender remains the least important, but age is more important than before. Alkaline phosphotase remains highly important, if not the most important predictor.
+
+```{r}
+# 17. Plot the SHAP values for every individual for every feature and interpret them.
+
+shap_long <- shap.prep(shap = shap_results,
+                       X_train = train_x)
+
+plot.shap.summary(shap_long)
+xgb.plot.shap(train_x, features = colnames(train_x), model = xgboost_train, n_col = 3)
+
+```
+From the first plot, we see that a high direct bilirubin level means a low probability of disease, and a low age gives a high probability of disease, although the feature values along the age line are rather mixed.
+The second plot shows that there are variarions in the importance of the predictors depending on their value. Aspartate aminotransferase levels, for example, increase in importance as they increase in magnitude. Total proteins are lease important when there are about 7 of them.
+
+```{r}
+# 18. Verify which of the models you created in this practical performs best on the test data
+
+test_data <- readRDS("data/test_disease.RDS")
+
+bagging_test <- predict(bagging, newdata = test_data)
+boosting_test <- predict(boosting, newdata = test_data)
+rf_test <- predict(random_forest, newdata = test_data)
+xgboost_test <- predict(xgboost_train, newdata = model.matrix(Disease ~ ., test_data)[,-1]) %>%
+  factor(x = ifelse(. < 0.5, 1, 2), levels = c(1,2), labels = c("Healthy", "Disease"))
+
+list(bagging_test, boosting_test, rf_test, xgboost_test) %>% 
+  map(~ confusionMatrix(.x, test_data$Disease))
+```
+Bagging predicts 57 instances correctly, boosting also predicts 57 instances correctly, random forest predicts 58 instances correctly and xgboosting predicts 55 instances correctly. So the random forest method was the best out of all of them for this data.
