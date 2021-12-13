@@ -1,0 +1,352 @@
+---
+Assignment 2
+Kris van der Riet, Raeven van den Acker
+---
+
+# PREDICTING THE SEX OF ABALONE SPECIES WITH DIFFERENT CLASSIFICATION ALGORITHMS
+
+In this assignment we will try to predict the sex of abalone species using various classification methods with the following variables:
+- Type: this is the variabele that will be predicted, indicated by M(ale), F(emale) or I(nfant).     Data type: nominal,            units: N/A
+- LongestShell: longest shell measurement. Data type: continious, units: mm
+- Diameter: the width perpendicular to the length of the abalone. Data type: continous, units: mm
+- Height: the height of the abalone. Data type: continuous, units: mm
+- Wholeweight: the total weight of the abalone. Data type: continous, units: grams
+- Shuckedweight: the weight of the meat, excluding the shell. Data type: continous, units: grams
+- Visceraweight: the weight of the gut. Data type: continous, units: grams
+- ShellWeight: the weight of the shell. Data type: continuous, units: grams
+- Rings: number of rings on the shell. Data type: integer, units: N/A
+
+The abalone data set is from the AppliedPredictiveModeling package in R and contains observations of 4177 abalones. 
+
+```{r}
+# Load packages
+library(tidyverse)
+library(cowplot)
+library(magrittr)
+library(AppliedPredictiveModeling)
+library(randomForest)
+library(MASS)
+library(class)
+library(cowplot)
+library(reshape) 
+library(e1071)
+set.seed(45)
+```
+
+# Importing and Exploring the Data
+```{r}
+data(abalone) # importing dataset
+
+head(abalone) # exploring head of data set
+tail(abalone) # exploring tail of data set
+str(abalone) # exploring the data types
+summary(abalone) # sumamry of the data set
+
+abalone %>% # making a few introduction plots, to investigate the data set
+  pivot_longer(where(is.numeric)) %>%
+  ggplot(aes(x = value, col = Type, fill = Type)) +
+  geom_boxplot(alpha = 0.8) +
+  facet_wrap(~name, scales = "free") +
+  scale_color_brewer(palette = "Accent") +
+  scale_fill_brewer(palette = "Accent") +
+  theme_minimal()
+
+abalone %>%
+  pivot_longer(where(is.numeric)) %>%
+  ggplot(aes(x = value, col = Type, fill = Type)) +
+  geom_density(alpha = 0.8) +
+  facet_wrap(~name, scales = "free") +
+  scale_color_brewer(palette = "Accent") +
+  scale_fill_brewer(palette = "Accent") +
+  theme_minimal()
+
+abalone %>%
+  ggplot(aes(x = Type, fill = Type)) +
+  geom_bar(alpha = 0.8) +
+  scale_color_brewer(palette = "Accent") +
+  scale_fill_brewer(palette = "Accent") +
+  theme_minimal() +
+  labs(title = "Abalone type distribution")
+```
+The boxplots show that the spread for infants is generally smaller than that for adults, which is logical since as the abalones grow external factors can have a larger effect on their characteristics, while with infants this is less so. The only instances where infants have a wider spread than adults is for LongestShell and Diameter. Height spreads are the narrowest for all three abalone types. For infants, the widest spread is LongestShell and Diameter. For males and females this is WholeWeight. Overall, the spread for males seems to be either the same as, or slightly larger than for females.
+In the density plots we see a large difference in the distributions of infant and adult abalones. Furthermore, the males tend to be very slightly skewed towards smaller values of each predictor than females.
+The bar plot shows that in the data set there are around 1500 males (the most), 1200 infants and 1150 females (the least).
+
+# The performance of the different classification models will be assessed with the accuracy of the model.
+
+```{r}
+# This function calculates the total accuracy, accuracy for males, accuracy for females and accuracy for infants for each model based on prediction and true values
+
+accuracy <- function(prediction, true){
+  
+  conf_matrix <- table(prediction = prediction, true = true)
+  accuracy_total <- (conf_matrix[1] + conf_matrix[5] + conf_matrix[9]) / sum(conf_matrix)
+  accuracy_male <- conf_matrix[9] / (conf_matrix[7] + conf_matrix[8] + conf_matrix[9])
+  accuracy_female <- conf_matrix[1] / (conf_matrix[1] + conf_matrix[2] + conf_matrix[3])
+  accuracy_infant <- conf_matrix[5] / (conf_matrix[4] + conf_matrix[5] + conf_matrix[6])
+  return(data.frame(accuracy_total = accuracy_total, accuracy_male = accuracy_male, accuracy_female = accuracy_female, accuracy_infant = accuracy_infant))
+}
+```
+
+
+# Splitting the data in train (80%) and test (20%) data to perform cross validation
+The models are fit based on the training data. Then they are tested on the test data to verify their performance on a "new" data set and avoid overfitting.
+
+```{r}
+
+abalone <- abalone %>% # add a split variable for training and testing
+  mutate(split = sample(rep(c("train", "test"), times = c(3342, 835))))
+
+abalone_train <- # abalone training set
+  abalone %>% 
+  filter(split == "train") %>%
+  dplyr::select(-split)
+
+abalone_test <- # abalone testing set
+  abalone %>% 
+  filter(split == "test") %>% 
+  dplyr::select(-split)
+```
+
+
+# We start by applying 2 different KNN algorithms, one with k = 2 and one with k = 5.
+
+```{r}
+# KNN with 2 neighbours
+knn_2_pred <- knn(
+  train = abalone_train %>% dplyr::select(-Type),
+  test  = abalone_test %>% dplyr::select(-Type),
+  cl    = abalone_train$Type,
+  k     = 2
+)
+
+# KNN with 5 neighbours
+knn_5_pred <- knn(
+  train = abalone_train %>% dplyr::select(-Type),
+  test  = abalone_test %>% dplyr::select(-Type),
+  cl    = abalone_train$Type,
+  k     = 5
+)
+
+acc_knn_2 <- accuracy(knn_2_pred, abalone_test$Type) # calculate accuracy for KNN-2 model
+acc_knn_5 <- accuracy(knn_5_pred, abalone_test$Type) # calculate accuracy for KNN-5 model
+
+acc_knn_2 #printing accuracy NN-2 model
+acc_knn_5 #printing accuracy NN-5 model
+```
+KNN is a relatively simple model in its explainability, which is why it was chosen to fit first.
+
+To visualize possible differences between the observations and the predictions, we make plots of the relation between abalone diameter and height, since this should be linear and show a clear difference between infants, males and females.
+```{r}
+p1 <- abalone_test %>% # plot of diameter versus height with as color the true values for Type
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = Type)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "True class")
+
+p2 <- bind_cols(abalone_test, prediction = knn_5_pred) %>% 
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = prediction)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "Predicted class (5nn)")
+
+p3 <- bind_cols(abalone_test, prediction = knn_2_pred) %>% 
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = prediction)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "Predicted class (2nn)")
+
+plot_grid(p1,p2,p3)
+```
+Neither KNN models seem to perform particularly well. Both have a total accuracy of approximately 0.5, so around 50% of the abalone types are misclassified. The 5-NN model works slightly better than the 2-NN model in most cases, which is as expected since more neighboring data points are taken into consideration per classification. The only instance where this is not the case is with females, which are accurately classified 41% of the time in the 5-NN model and 43% of the time in the 2-NN model. This could be due to the narrower spread of their predictors compared to males (see boxplots).
+
+These models seem to be better at classifying infants, with an accuracy of around 0.7, compared to females and males, which have only an accuracy of around 0.4. This could also be due to the narrower spread of their predictors relative to adults (see boxplots)
+
+In search of a model with higher accuracy, we fit a random forest model to the training data.
+
+# Random forest model is tested to predict the Type of the abalone, the number of trees is chosen to be 200
+```{r}
+rf_model <- randomForest(Type~.,data = abalone_train, ntree = 200, nodesize = 1, importance = TRUE)
+rf_error <- data.frame(rf_model$err.rate, trees = seq(1,200,1)) # error of the randomforest model
+
+rf_error %>% # plotting the overall error as a function of the number of trees in the training phase
+  ggplot(aes(x = trees, y = OOB)) +
+  geom_point() + geom_line() + 
+  ylab("Overall error") + 
+  theme_minimal()
+```
+Here we see that as the number of trees in the random forest model increases, the overall error of the model decreases, since more trees allows for more instances to be predicted and combined. After a certain point however, the reduction in error stabilizes and more trees only becomes more computationally cumbersome. This occurs at around 200 trees, so our random forest model has 200 trees.
+
+```{r}
+rf_pred <- predict(rf_model, newdata = abalone_test) # prediction made on test data
+acc_rf <- accuracy(rf_pred, abalone_test$Type) # accuracy of the RF model
+acc_rf #printing accuracy of RF model
+
+p4 <- bind_cols(abalone_test, prediction = rf_pred) %>% 
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = prediction)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "Predicted class (RF)")
+
+plot_grid(p1,p4) # comparison between predicted plot and true plot
+```
+Here we compare the observations of height and diameter with the random forest predictions. Visually, there are differences, but they seem more similar than for the KNN models. The data deviating from the main cluster match each other quite well, which was not the case for the KNN models. The exact distribution of the abalone types is where the main differences are.
+
+The random forest model has an average accuracy of around 0.56, meaning that around 45% of the abalone species are predicted as the wrong type. This is slightly less than for the KNN models, so the random forest is an improvement. Of the three types, infants are the most accurately classified, higher than 80% most of the time, which is in line with the improvement in overall accuracy. Males are accurately classified about 50% of the time and females around 40% on average of the time, so this model works better for males than females, with female accuracy having decreased compared to the KNN models.
+
+An advantage of the random forest model is that the Gini coefficient can be used to find the relative importance of each predictor in classifying abalone type.
+
+```{r}
+# With the rf model, the relative importance of each variable can be examined using the Gini coefficient
+gini_coef <- data.frame(gini_coef = importance(rf_model)[,5], Variable = row.names(importance(rf_model)))
+ggplot(aes(x = Variable, y = gini_coef, fill = Variable), data = gini_coef) +
+  geom_bar(stat = "identity") +
+  scale_fill_viridis_d() +
+  theme_minimal() + 
+  theme(axis.text.x=element_text(angle=45,hjust=1,vjust=0.5)) + 
+  labs(
+    x = "", 
+    y = "Mean reduction in Gini coefficient", 
+    title = "Variable importance"
+  )
+```
+This plot shows the relative importance of each predictor included in the model. Here we see that the Diameter and Height of the abalone are the most important predictors, since they reduce the Gini coefficient the least out of all predictors. The VisceraWeight and WholeWeight of the abalone reduce the Gini coefficient the most and are therefore the least important. 
+
+Until now, the random forest model has the best performance, but an accuracy of 0.56 is still not great, so we fit an LDA model to the data.
+
+
+# A linear discrinant analysis model is made to investigate the prediction of types of abalone
+
+```{r}
+lda_mod <- lda(Type ~ ., data = abalone_train)
+pred_lda <- predict(lda_mod, newdata = abalone_test)$class
+
+acc_lda <- accuracy(pred_lda, abalone_test$Type) # calculating the accuracy of the LDA model
+
+acc_lda #printing accuracy of LDA model
+
+p5 <- bind_cols(abalone_test, prediction = pred_lda) %>% 
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = prediction)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "Predicted class (LDA)")
+
+plot_grid(p1,p5) # comparison between predicted plot and true plot
+```
+Comparing the predictions to the observations visually, we see that the LDA model is far too strict with separating infants from adults - there are no smaller males predicted. Furthermore, the data points outside the main cluster don't match, as they did for the random forest model. On the other hand, the spread of female data points is much more accurate than in the previous models
+
+The accuracy of the LDA model is very close to that of the random forest model, but is very slightly lower, at 0.558 rather than 0.560. This model does seem to predict male abalone with the highest accuracy: 0.50. For female abalone, however, the accuracy has decreased again relative to the previous models, to 0.35. The infant accuracy is slightly higher at 0.82. The reduction in female accuracy has therefore reduced the total accuracy to such an extent as to be worse than the random forest model.
+
+The LDA model is still not great so we fit a few SVM models to see if these will improve accuracy.
+
+# A support vector machine model is made to investigate the prediction of types of abalone
+```{r}
+svm_model_linear = svm(formula = Type ~ .,
+                 data = abalone_train,
+                 type = 'C-classification',
+                 kernel = 'linear')
+pred_svm_linear <- predict(svm_model_linear, newdata = abalone_test)
+
+svm_model_polynomial = svm(formula = Type ~ .,
+                 data = abalone_train,
+                 type = 'C-classification',
+                 kernel = 'polynomial')
+pred_svm_polynomial <- predict(svm_model_polynomial, newdata = abalone_test)
+
+svm_model_radial = svm(formula = Type ~ .,
+                 data = abalone_train,
+                 type = 'C-classification',
+                 kernel = 'radial')
+pred_svm_radial <- predict(svm_model_radial, newdata = abalone_test)
+
+acc_svm_linear <- accuracy(pred_svm_linear, abalone_test$Type) #calculating accuracy of svm linear model
+acc_svm_polynomial <- accuracy(pred_svm_polynomial, abalone_test$Type) #calculating accuracy of svm polynomial model
+acc_svm_radial <- accuracy(pred_svm_radial, abalone_test$Type) #calculating accuracy of svm radial model
+
+acc_svm_linear  #printing accuracy of svm linear model
+acc_svm_polynomial  #printing accuracy of svm polynomial model
+acc_svm_radial #printing accuracy of svm radial model
+
+p6 <- bind_cols(abalone_test, prediction = pred_svm_linear) %>% 
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = prediction)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "Predicted class (SVM linear)")
+
+p7 <- bind_cols(abalone_test, prediction = pred_svm_polynomial) %>% 
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = prediction)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "Predicted class (SVM polynomial)")
+
+p8 <- bind_cols(abalone_test, prediction = pred_svm_radial) %>% 
+      arrange(abalone_test) %>% 
+      ggplot(aes(x = Diameter, y = Height, colour = prediction)) +
+      geom_point(size = 1.3, alpha = 0.5) + 
+      scale_colour_viridis_d() +
+      theme_minimal() +
+      labs(title = "Predicted class (SVM radial)")
+
+
+plot_grid(p1,p6,p7,p8) # comparison between predicted plot and true plot
+```
+These visualizations show that all the SVM models predict the classes far too strict, with almost no male prediction in the lower height/diameter region and no infants in the higher height/diameter region. Furthermore, we can observe that the polynomial SVM predicts only a few female types, only in the high height/diameter region. 
+
+All the SVM models show a similar overall accuracy, with respectively 0.56, 0.54 and 0.57 for the linear, polynomial and radial case. When comparing the results for the individual classes, remarkable stats occur. The linear model shows a very high accuracy of 0.87 for the prediction of infants, a reasonable accuracy of 0.53 for males and a low accuracy of 0.27 for females. The polynomial model shows a very high accuracy of 0.86 for the prediction of males, a reasonable accuracy of 0.62 for infants and a very low accuracy of only 0.01 for females. The radial model also shows a high accuracy of 0.85 for infants, a reasonable accuracy of 0.55 for males and a low accuracy of 0.29 for females.
+
+# Overview of tested models
+```{r}
+Models <- c("KNN 2", "KNN 5", "RandomForest", "LDA", "SVM linear", "SVM polynomial", "SVM radial")
+total_accuracy <- data.frame(bind_rows((acc_knn_2), (acc_knn_5), (acc_rf), (acc_lda), (acc_svm_linear), (acc_svm_polynomial), (acc_svm_radial)), Models)
+
+ggplot(aes(x = Models, y = accuracy_total, fill = Models), data = total_accuracy) +
+  geom_bar(stat = "identity") +
+  scale_fill_viridis_d() +
+  theme_minimal() + 
+  theme(axis.text.x=element_text(angle=45,hjust=1,vjust=0.5)) + 
+  labs(
+    x = "", 
+    y = "Accuracy", 
+    title = "Overall model accuracy"
+  )
+```
+Here we see that the LDA and random forest model are very close together in accuracy, while the 5-NN model is slightly lower and the 2-NN model is much lower. Where the LDA and random forest models differ the most is in male/female accuracy, so depending on what the classification model would be used for, the more appropriate model can be chosen. The best performing model overall is the radial SVM, which performs slightly better than the linear SVM. The polynomial SVM is the worst of the SVM models, only peforming better than the 2-NN model. 
+
+#Overview of accuracy per type per model
+
+```{r}
+long_format <- melt(total_accuracy, "Models")
+labels_acc <- c("Total accuracy", "Accuracy male", "Accuracy female", "Accuracy infant")
+ggplot(aes(x = variable, y = value, fill = Models), data = long_format) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_viridis_d() + 
+  scale_x_discrete(labels= labels_acc) +
+  theme_minimal() + 
+  labs(
+    x = "", 
+    y = "Accuracy", 
+    title = "Model accuracy per abalone type"
+  )
+```
+Here we can see the differences in model accuracy per type. If the purpose of the model is to more accurately classify male abalones, then the LDA model is the best option.  To classify infants, the LDA model is the best option. 
+To more accurately classify female abalones, the 2-NN model is the best option, but this option is the worst at classifying all the rest of the abalone types, so only use this if females are the only focus. The reason the worst model in all other respects works the best for classifying females could be because most of the data are of female abalones, so if an observation is randomly classified, it has the highest chance of being female. However, this is not the case (see bar plot) so there is something inherent to the 2-NN model that more accurately classifies females than the other two types.
+The polynomial SVM model works very well for males and very badly for females, so for a male-oriented task this is a very good model but for the other abalone types not so much. The linear and radial SVM models are very close in total accuracy, but the linear model outperforms radial when classifying both females and infants, even though the radial model is slighly more accurate overall. The linear model is the best at classifying infants since there is a clear divide between infant and adult abalone characteristics, which is well delineated by a straight line rather than a polynomial or radial function.
+This makes the radial SVM model the best for total accuracy, the polynonmial model the best for classifying males, the 2-NN model the best for classifying females and the linear SVM model the best for classifying infants.
+
+
+
+
